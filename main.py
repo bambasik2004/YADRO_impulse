@@ -91,13 +91,25 @@ def parse_input_xml(path):
     # Создаем сами элементы диаграммы
     objects = {}
     for element in root.findall('Class'):
-        # Получаем все атрибуты тега
+        # Проверка соответствию формата <Class>
         cur_tag_attr = element.attrib
         cur_name = cur_tag_attr['name']
-        cur_is_root = cur_tag_attr['isRoot'] == 'true'
-        cur_doc = cur_tag_attr['documentation']
-        # Получаем все атрибуты элемента
-        cur_elem_attr = [attr.attrib for attr in element.findall('Attribute')]
+        try:
+            # Получаем все атрибуты тега
+            cur_is_root = cur_tag_attr['isRoot'] == 'true'
+            cur_doc = cur_tag_attr['documentation']
+            # Получаем все атрибуты элемента
+            cur_elem_attr = []
+            for attr in element.findall('Attribute'):
+                # Проверяем на наличие атрибута type у <Attribute>
+                try:
+                    if attr.attrib['type']:
+                        cur_elem_attr.append(attr.attrib)
+                except:
+                    raise Exception('type внутри тега <Attribute>')
+        except Exception as e:
+            raise Exception(f'Ошибка при создание объекта класса {cur_name}.\n'
+                            f'Проверьте соответствие формату атрибута {e}.')
         # Создаем объект класса Node и переносим туда все атрибуты
         new_node = Node(cur_name, cur_is_root, cur_doc, cur_elem_attr if cur_elem_attr else None)
         # Добавляем в виде словаря, чтобы потом проще находить нужный класс для установления реляций
@@ -105,14 +117,18 @@ def parse_input_xml(path):
         # Запоминаем root object
         if new_node.get_is_root():
             root_class = new_node
-
     # Устанавливаем реляции
     for element in root.findall('Aggregation'):
         # Получаем все атрибуты тега
         cur_tag_attr = element.attrib
         cur_source = cur_tag_attr['source']
         cur_target = cur_tag_attr['target']
-        cur_multiplicity = parse_multiplicity(cur_tag_attr['sourceMultiplicity'])
+        # Проверка соответствию формата <Aggregation>
+        try:
+            cur_multiplicity = parse_multiplicity(cur_tag_attr['sourceMultiplicity'])
+        except Exception as e:
+            raise Exception(f'Ошибка при установлении агрегаций source={cur_source}, cur_target={cur_target}.\n'
+                            f'Проверьте соответствие формату.')
         # Добавляем multiplicity наследников
         objects[cur_target].set_children_multiplicity(cur_multiplicity, cur_source)
         # Добавляем самих наследников для родительского класса
