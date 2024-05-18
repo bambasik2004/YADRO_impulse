@@ -4,7 +4,7 @@ import os
 
 
 class Node:
-    def __init__(self, name=None, is_root: bool = None, doc=None, attrs=None):
+    def __init__(self, name, is_root: bool, doc, attrs=None):
         self.__name = name
         self.__is_root = is_root
         self.__doc__ = doc
@@ -14,26 +14,31 @@ class Node:
         self.__children_multiplicity = {}
         self.__multiplicity = None
 
-    def get_name(self):
+    @property
+    def name(self):
         return self.__name
 
-    def get_attrs(self):
+    @property
+    def attrs(self):
         return self.__attrs
 
-    def get_is_root(self):
+    @property
+    def is_root(self):
         return self.__is_root
 
-    def get_multiplicity(self):
+    @property
+    def multiplicity(self):
         return self.__multiplicity
 
-    def get_children(self):
+    @property
+    def children(self):
         '''
         :return: dict формата: {class_name: object}, object type - Node
         '''
         return self.__children
 
     def set_parent(self, parent: 'Node'):
-        parent_name = parent.get_name()
+        parent_name = parent.name
         if parent_name not in self.__parents:
             self.__parents[parent_name] = parent
 
@@ -47,14 +52,16 @@ class Node:
         self.__children_multiplicity[name] = target
 
     def add_child(self, child: 'Node'):
-        child_name = child.get_name()
+        child_name = child.name
         if child_name not in self.__children:
             self.__children[child_name] = [child]
         else:
             self.__children[child_name].append(child)
 
     def valid_node(self):
-        # Проверяем на соответствие source multiplicity
+        '''
+        Проверяем на соответствие заданной multiplicity
+        '''
         if self.__children_multiplicity:
             for source, source_range in self.__children_multiplicity.items():
                 child_list = self.__children[source]
@@ -64,22 +71,10 @@ class Node:
         return True
 
 
-def parse_multiplicity(multiplicity):
-    '''
-    Функция для формирования range из строки multiplicity
-    :param multiplicity: передаем строку вида 0..42 или 1
-    :return: range из допустимых значений
-    '''
-    if multiplicity.isnumeric():
-        return range(int(multiplicity), int(multiplicity) + 1)
-    else:
-        start, end = map(int, multiplicity.split('..'))
-        return range(start, end + 1)
-
-
 # Парсинг input файла
 def parse_input_xml(path):
     '''
+    Парсим входной XML-file
     :param path: путь до input файла
     :return: root UML диаграммы
     '''
@@ -106,6 +101,7 @@ def parse_input_xml(path):
                     if attr.attrib['type']:
                         cur_elem_attr.append(attr.attrib)
                 except:
+                    # Чтобы дать пользователю понять о несоответствие конкретно атрибутов тега <Attribute>
                     raise Exception('type внутри тега <Attribute>')
         except Exception as e:
             raise Exception(f'Ошибка при создание объекта класса {cur_name}.\n'
@@ -113,9 +109,9 @@ def parse_input_xml(path):
         # Создаем объект класса Node и переносим туда все атрибуты
         new_node = Node(cur_name, cur_is_root, cur_doc, cur_elem_attr if cur_elem_attr else None)
         # Добавляем в виде словаря, чтобы потом проще находить нужный класс для установления реляций
-        objects[new_node.get_name()] = new_node
+        objects[new_node.name] = new_node
         # Запоминаем root object
-        if new_node.get_is_root():
+        if new_node.is_root:
             root_class = new_node
     # Устанавливаем реляции
     for element in root.findall('Aggregation'):
@@ -125,8 +121,13 @@ def parse_input_xml(path):
         cur_target = cur_tag_attr['target']
         # Проверка соответствию формата <Aggregation>
         try:
-            cur_multiplicity = parse_multiplicity(cur_tag_attr['sourceMultiplicity'])
-        except Exception as e:
+            cur_multiplicity = cur_tag_attr['sourceMultiplicity']
+            if cur_multiplicity.isnumeric():
+                cur_multiplicity = range(int(cur_multiplicity), int(cur_multiplicity) + 1)
+            else:
+                start, end = map(int, cur_multiplicity.split('..'))
+                cur_multiplicity = range(start, end + 1)
+        except Exception:
             raise Exception(f'Ошибка при установлении агрегаций source={cur_source}, cur_target={cur_target}.\n'
                             f'Проверьте соответствие формату.')
         # Добавляем multiplicity наследников
@@ -142,10 +143,13 @@ def parse_input_xml(path):
 
 
 # Валидация (проходимся по дереву)
-def valid_uml(node):
+def valid_uml(node: Node):
+    '''
+    Проверяем правильность UML проходясь по дереву
+    '''
     if not node.valid_node():
         return False
-    children = node.get_children()
+    children = node.children
     for child_list in children.values():
         for child in child_list:
             if not valid_uml(child):
@@ -156,15 +160,15 @@ def valid_uml(node):
 # Создание ET для вывода в указанном XML формате
 def xml_output(node: Node, xml_item: ET.Element):
     '''
-    Для формирования xml файла передаем root UML и root XML
+    Формирования xml файла передаем root UML и root XML
     '''
     # Создаем атрибуты текущего элемента
-    if node.get_attrs():
-        for attr_dict in node.get_attrs():
+    if node.attrs:
+        for attr_dict in node.attrs:
             ET.SubElement(xml_item, attr_dict['name']).text = attr_dict['type']
     # Получаем все внутренние теги (всех наследников)
-    if node.get_children():
-        for name, child_list in node.get_children().items():
+    if node.children:
+        for name, child_list in node.children.items():
             sub_tag = ET.SubElement(xml_item, name)
             if child_list:
                 xml_output(child_list[0], sub_tag)
@@ -172,13 +176,13 @@ def xml_output(node: Node, xml_item: ET.Element):
 
 
 # Проходимся по всем классам в UML
-def json_output(node, result):
+def json_output(node: Node, result: list):
     '''
     Сохраняет в переменную result все классы в указанном формате
     '''
-    if node.get_is_root():
+    if node.is_root:
         result.append(json_format_for_node(node))
-    children = node.get_children()
+    children = node.children
     if children:
         for child_list in children.values():
             # Берем только 1 объект класса если их несколько
@@ -188,25 +192,25 @@ def json_output(node, result):
 
 
 # Формируем json для 1 класса
-def json_format_for_node(node):
+def json_format_for_node(node: Node):
     '''
     Создаем dict нужного формата вывода для одного класса
     '''
-    meta_inform = {"class": node.get_name(),
+    meta_inform = {"class": node.name,
                    "documentation": node.__doc__,
-                   "isRoot": node.get_is_root(),
+                   "isRoot": node.is_root,
                    }
     # Добавляет target multiplicity если она есть
-    if node.get_multiplicity():
-        meta_inform["max"] = max(node.get_multiplicity())
-        meta_inform["min"] = min(node.get_multiplicity())
+    if node.multiplicity:
+        meta_inform["max"] = max(node.multiplicity)
+        meta_inform["min"] = min(node.multiplicity)
     # Добавляем parameters если они есть
-    if node.get_attrs():
-        meta_inform["parameters"] = node.get_attrs()
+    if node.attrs:
+        meta_inform["parameters"] = node.attrs
     else:
         meta_inform["parameters"] = []
     # Проходимся по всем порожденным классам от данного
-    children = node.get_children()
+    children = node.children
     if children:
         for name, child_list in children.items():
             if child_list:
@@ -226,7 +230,7 @@ if __name__ == '__main__':
     if valid_uml(root_class):
         # config.xml
         # Создаем root
-        xml_root = ET.Element(root_class.get_name())
+        xml_root = ET.Element(root_class.name)
         # Вызываем функцию формирования XML файла
         xml_output(root_class, xml_root)
         # Создаем config файл с нужными отступами
